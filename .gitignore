@@ -1,0 +1,5 @@
+data
+.venv
+*.env*
+*.sqlite3
+startcommand.txt

@@ -1,0 +1,11 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: who-am-AI-redis
+    ports:
+      - "6379:6379" # Mapeia a porta do Redis para o host (opcional, para depuração)
+    healthcheck: # Verifica a saúde do serviço Redis
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
