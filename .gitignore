@@ -30,3 +30,6 @@ data
 *.env*
 *.sqlite3
 startcommand.txt
+
+.vscode/
+/static/

@@ -1,0 +1,72 @@
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    line-height: 1.15;
+    /* 1 */
+    -webkit-text-size-adjust: 100%;
+    /* 2 */
+}
+
+body {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Definição da Paleta de Cores com Variáveis CSS */
+:root {
+    /* Tons de Cinza Escuro */
+    --color-dark-gray-900: #1a202c;
+    /* Quase preto */
+    --color-dark-gray-800: #2d3748;
+    --color-dark-gray-700: #4a5568;
+    --color-dark-gray-600: #718096;
+
+    /* Azul */
+    --color-blue-500: #3498db;
+    /* Azul principal */
+    --color-blue-600: #2980b9;
+    --color-blue-700: #1f618d;
+
+    /* Verde */
+    --color-green-500: #2ecc71;
+    /* Verde de sucesso */
+    --color-green-600: #27ae60;
+    --color-green-700: #1e8449;
+
+    /* Vermelho */
+    --color-red-500: #e74c3c;
+    /* Vermelho de erro/perigo */
+    --color-red-600: #c0392b;
+    --color-red-700: #943126;
+
+    /* Laranja */
+    --color-orange-500: #f39c12;
+    /* Laranja de aviso/destaque */
+    --color-orange-600: #e67e22;
+    --color-orange-700: #d35400;
+
+    /* Cores de Fundo Divertidas (exemplo para uso em gradientes ou elementos específicos) */
+    --color-fun-bg-1: #8e44ad;
+    /* Roxo */
+    --color-fun-bg-2: #3498db;
+    /* Azul */
+    --color-fun-bg-3: #e67e22;
+    /* Laranja vibrante */
+    --color-fun-bg-4: #27ae60;
+    /* Verde esmeralda */
+    --color-fun-bg-5: #f1c40f;
+    /* Amarelo */
+}
+
+body {
+    background-color: var(--color-dark-gray-900);
+    /* Fundo base escuro */
+    color: #ffffff;
+    /* Cor do texto padrão */
+}

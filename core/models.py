@@ -34,25 +34,24 @@ class GameSession(models.Model):
         help_text="Nome do personagem que a IA escolheu",
     )
     is_completed = models.BooleanField(
-        default=False,
-        help_text="Indica se a sessão de jogo foi concluída",
+        default=False, help_text="Indica se a sessão de jogo foi concluída"
     )
     score = models.IntegerField(
-        default=0,
-        help_text="Pontuação final do jogador nesta sessão",
+        default=0, help_text="Pontuação final do jogador nesta sessão"
     )
     start_time = models.DateTimeField(
-        auto_now_add=True,
-        help_text="Data e hora de início da sessão",
+        auto_now_add=True, help_text="Data e hora de início da sessão"
     )
     end_time = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="Data e hora de término da sessão",
+        null=True, blank=True, help_text="Data e hora de término da sessão"
     )
+    attempts_left = models.IntegerField(
+        default=0,
+        help_text="Número de tentativas restantes para adivinhar o personagem",
+    )  # NOVO CAMPO
 
     def __str__(self):
-        return f"Sessão {self.session_id} - Usuário: {self.user.username} - Tema: {self.theme}"
+        return f"Sessão {self.session_id} - Usuário: {self.user.username if self.user else 'Anônimo'} - Tema: {self.theme}"
 
 
 class ChatMessage(models.Model):
@@ -61,9 +60,7 @@ class ChatMessage(models.Model):
     """
 
     session = models.ForeignKey(
-        GameSession,
-        on_delete=models.CASCADE,
-        related_name="chat_messages",
+        GameSession, on_delete=models.CASCADE, related_name="chat_messages"
     )
     sender = models.CharField(
         max_length=10,
@@ -72,8 +69,7 @@ class ChatMessage(models.Model):
     )
     message_text = models.TextField(help_text="Conteúdo da mensagem")
     timestamp = models.DateTimeField(
-        auto_now_add=True,
-        help_text="Data e hora da mensagem",
+        auto_now_add=True, help_text="Data e hora da mensagem"
     )
 
     class Meta:

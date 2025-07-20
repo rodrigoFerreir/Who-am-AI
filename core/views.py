@@ -1,13 +1,14 @@
+import json
 import uuid
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated, AllowAny  # Importe AllowAny
-from rest_framework_simplejwt.tokens import RefreshToken  # Para gerar tokens JWT
-from django.contrib.auth import authenticate  # Para autenticar usuários
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework_simplejwt.tokens import RefreshToken  # Importar RefreshToken
+from django.contrib.auth import authenticate  # Importar authenticate
 
-from channels.layers import get_channel_layer
-from asgiref.sync import async_to_sync
+# Importa as tarefas Celery
+from .tasks import process_start_game_task, process_player_message_task
 
 from .serializers import (
     StartGameRequestSerializer,
@@ -15,12 +16,18 @@ from .serializers import (
     MessageSerializer,
     UserRegisterSerializer,
     UserLoginSerializer,
+    UserSerializer,
 )
-
-from .models import GameSession
+from .models import GameSession  # Apenas para criar a sessão, o resto é na task
 
 
 class StartGameAPIView(APIView):
+    """
+    API View para iniciar um novo jogo.
+    Recebe tema e nível, cria uma sessão e enfileira uma tarefa Celery.
+    Retorna o session_id.
+    """
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request, format=None):
@@ -28,18 +35,23 @@ class StartGameAPIView(APIView):
         if serializer.is_valid():
             theme = serializer.validated_data["theme"]
             level = serializer.validated_data["level"]
-            session_id = str(uuid.uuid4())
+            session_id = str(uuid.uuid4())  # Gera um ID de sessão único
 
             print(
-                f"DEBUG API: Tentando criar GameSession com session_id={session_id}, user={request.user.username}"
+                f"DEBUG API: Recebida requisição para iniciar jogo. session_id={session_id}, user={request.user.username}"
             )
 
             try:
+                # Cria a sessão de jogo no banco de dados.
+                # A associação do usuário é feita aqui, pois a sessão precisa existir para o WebSocket.
                 game_session = GameSession.objects.create(
-                    session_id=session_id, theme=theme, level=level, user=request.user
+                    session_id=session_id,
+                    theme=theme,
+                    level=level,
+                    user=request.user,  # Associe o usuário logado
                 )
                 print(
-                    f"DEBUG API: GameSession {game_session.session_id} criada com sucesso."
+                    f"DEBUG API: GameSession {game_session.session_id} criada no banco de dados."
                 )
             except Exception as e:
                 print(f"DEBUG API: ERRO ao criar GameSession: {str(e)}")
@@ -48,16 +60,10 @@ class StartGameAPIView(APIView):
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
 
-            channel_layer = get_channel_layer()
-            async_to_sync(channel_layer.group_send)(
-                f"game_{session_id}",
-                {
-                    "type": "start_game_from_api",
-                    "session_id": session_id,
-                    "theme": theme,
-                    "level": level,
-                    "user_id": request.user.id,
-                },
+            # Enfileira a tarefa Celery para processar o início do jogo e obter a primeira dica.
+            process_start_game_task.delay(session_id, theme, level, request.user.id)
+            print(
+                f"DEBUG API: Tarefa 'process_start_game_task' enfileirada para sessão {session_id}."
             )
 
             response_data = {"session_id": session_id}
@@ -67,6 +73,12 @@ class StartGameAPIView(APIView):
 
 
 class AIMessageView(APIView):
+    """
+    API View para enviar uma mensagem do usuário para a sessão de jogo.
+    Enfileira uma tarefa Celery para processar a mensagem.
+    A resposta da IA será enviada de volta via WebSocket.
+    """
+
     permission_classes = [IsAuthenticated]
 
     def post(self, request, format=None):
@@ -74,36 +86,20 @@ class AIMessageView(APIView):
         if serializer.is_valid():
             session_id = serializer.validated_data["session_id"]
             player_message = serializer.validated_data["message"]
+            user_id = request.user.id  # Pega o ID do usuário autenticado
 
             print(
-                f"DEBUG API: Recebida mensagem para session_id={session_id}, message='{player_message}'"
+                f"DEBUG API: Recebida mensagem para sessão {session_id}, mensagem='{player_message[:50]}'"
             )
 
-            channel_layer = get_channel_layer()
-            try:
-                async_to_sync(channel_layer.group_send)(
-                    f"game_{session_id}",
-                    {
-                        "type": "player_message_from_api",
-                        "message": player_message,
-                        "session_id": session_id,
-                        "user_id": request.user.id,
-                    },
-                )
-                print(
-                    f"DEBUG API: Mensagem encaminhada para WebSocket group game_{session_id}"
-                )
-            except Exception as e:
-                print(
-                    f"DEBUG API: ERRO ao encaminhar mensagem para WebSocket: {str(e)}"
-                )
-                return Response(
-                    {
-                        "error": f"Erro ao encaminhar mensagem para o WebSocket: {str(e)}"
-                    },
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
+            # Enfileira a tarefa Celery para processar a mensagem do jogador.
+            process_player_message_task.delay(session_id, player_message, user_id)
+            print(
+                f"DEBUG API: Tarefa 'process_player_message_task' enfileirada para sessão {session_id}."
+            )
 
+            # A resposta HTTP para esta requisição é apenas um ACK.
+            # A resposta real da IA virá via WebSocket.
             return Response(
                 {"status": "Mensagem recebida e encaminhada."},
                 status=status.HTTP_200_OK,
@@ -116,9 +112,7 @@ class UserRegisterAPIView(APIView):
     API View para registro de novos usuários.
     """
 
-    permission_classes = [
-        AllowAny
-    ]  # Permite que usuários não autenticados acessem esta view
+    permission_classes = [AllowAny]
 
     def post(self, request, format=None):
         serializer = UserRegisterSerializer(data=request.data)
@@ -152,7 +146,11 @@ class UserLoginAPIView(APIView):
             if user is not None:
                 refresh = RefreshToken.for_user(user)
                 return Response(
-                    {"access": str(refresh.access_token), "refresh": str(refresh)},
+                    {
+                        "access": str(refresh.access_token),
+                        "refresh": str(refresh),
+                        "username": user.username,  # Incluir o nome de usuário na resposta
+                    },
                     status=status.HTTP_200_OK,
                 )
             else:
@@ -161,3 +159,15 @@ class UserLoginAPIView(APIView):
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UserDetailAPIView(APIView):
+    """
+    API View para retornar os detalhes do usuário autenticado.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, format=None):
+        serializer = UserSerializer(request.user)
+        return Response(serializer.data, status=status.HTTP_200_OK)

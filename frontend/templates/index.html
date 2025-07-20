@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Quem Sou Eu?{% endblock %}</title>
+
+    <!-- Link para o seu CSS de reset e variáveis de cor -->
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'css/base.css' %}">
+
+    <!-- Tailwind CSS CDN (para utilitários rápidos) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Google Fonts: Inter (para tipografia moderna e legível) -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+
+    <!-- Font Awesome para ícones (se for usar) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+
+    <!-- Bloco para CSS adicional específico da página -->
+    {% block extra_css %}{% endblock %}
+</head>
+<body class="font-inter">
+    <!-- Bloco principal de conteúdo onde as outras páginas se encaixarão -->
+    {% block content %}{% endblock %}
+
+    <!-- Bloco para JavaScript adicional específico da página -->
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

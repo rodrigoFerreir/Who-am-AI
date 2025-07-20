@@ -1,0 +1,287 @@
+body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+}
+
+.main-container {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 600px;
+    min-height: 85vh;
+    /* Aumentado para dar mais espaço ao chat */
+    background-color: var(--color-dark-gray-800);
+    /* Fundo do container principal */
+    border-radius: 15px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    background-color: var(--color-dark-gray-700);
+    /* Fundo do cabeçalho */
+    border-bottom: 1px solid var(--color-dark-gray-600);
+    color: white;
+}
+
+.header h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--color-blue-500);
+    /* Cor do título */
+}
+
+.auth-links a,
+.auth-links span {
+    margin-left: 15px;
+    color: var(--color-green-500);
+    /* Cor dos links de autenticação */
+    text-decoration: none;
+    font-weight: 600;
+    transition: color 0.2s ease;
+}
+
+.auth-links a:hover {
+    color: var(--color-green-600);
+    text-decoration: underline;
+}
+
+.chat-container {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Nova barra de status para mensagens do sistema */
+.status-bar {
+    padding: 10px 20px;
+    background-color: var(--color-dark-gray-700);
+    color: var(--color-orange-500);
+    /* Cor de destaque para avisos */
+    font-size: 0.9rem;
+    text-align: center;
+    border-bottom: 1px solid var(--color-dark-gray-600);
+    transition: background-color 0.3s ease;
+}
+
+.chat-messages {
+    flex-grow: 1;
+    padding: 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background-color: var(--color-dark-gray-900);
+}
+
+.message {
+    max-width: 80%;
+    padding: 10px 15px;
+    border-radius: 15px;
+    word-wrap: break-word;
+}
+
+.message.user {
+    align-self: flex-end;
+    background-color: var(--color-blue-500);
+    /* Mensagem do usuário */
+    color: white;
+    border-bottom-right-radius: 5px;
+}
+
+.message.ai {
+    align-self: flex-start;
+    background-color: var(--color-dark-gray-700);
+    /* Mensagem da IA */
+    color: white;
+    border: 1px solid var(--color-dark-gray-600);
+    border-bottom-left-radius: 5px;
+}
+
+/* A classe .message.system não será mais usada para o chat principal */
+
+.chat-input-area {
+    display: flex;
+    padding: 15px;
+    border-top: 1px solid var(--color-dark-gray-700);
+    background-color: var(--color-dark-gray-800);
+}
+
+.chat-input {
+    flex-grow: 1;
+    border: 1px solid var(--color-dark-gray-600);
+    background-color: var(--color-dark-gray-900);
+    color: white;
+    border-radius: 20px;
+    padding: 10px 15px;
+    outline: none;
+    font-size: 1rem;
+}
+
+.chat-input:focus {
+    border-color: var(--color-blue-500);
+    box-shadow: 0 0 0 0.2rem rgba(52, 152, 219, 0.25);
+}
+
+.send-button {
+    background-color: var(--color-blue-500);
+    color: white;
+    border: none;
+    border-radius: 20px;
+    padding: 10px 20px;
+    margin-left: 10px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+    font-weight: 600;
+}
+
+.send-button:hover {
+    background-color: var(--color-blue-600);
+}
+
+.game-controls {
+    padding: 15px;
+    background-color: var(--color-dark-gray-700);
+    border-bottom: 1px solid var(--color-dark-gray-600);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    align-items: center;
+}
+
+.game-controls select,
+.game-controls button {
+    padding: 8px 15px;
+    border-radius: 8px;
+    border: 1px solid var(--color-dark-gray-600);
+    background-color: var(--color-dark-gray-900);
+    color: white;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+}
+
+.game-controls button {
+    background-color: var(--color-green-500);
+    /* Botão de iniciar jogo */
+    color: white;
+    border-color: var(--color-green-500);
+}
+
+.game-controls button:hover {
+    background-color: var(--color-green-600);
+    border-color: var(--color-green-600);
+}
+
+.game-controls select:focus,
+.game-controls button:focus {
+    outline: none;
+    border-color: var(--color-blue-500);
+    box-shadow: 0 0 0 0.2rem rgba(52, 152, 219, 0.25);
+}
+
+.score-display {
+    font-size: 1.1rem;
+    font-weight: bold;
+    color: var(--color-orange-500);
+    /* Pontuação em laranja */
+    margin-left: 15px;
+}
+
+.modal {
+    display: none;
+    /* Hidden by default */
+    position: fixed;
+    /* Stay in place */
+    z-index: 1;
+    /* Sit on top */
+    left: 0;
+    top: 0;
+    width: 100%;
+    /* Full width */
+    height: 100%;
+    /* Full height */
+    overflow: auto;
+    /* Enable scroll if needed */
+    background-color: rgba(0, 0, 0, 0.6);
+    /* Fundo escuro semi-transparente */
+    justify-content: center;
+    align-items: center;
+}
+
+.modal-content {
+    background-color: var(--color-dark-gray-800);
+    margin: auto;
+    padding: 30px;
+    border-radius: 15px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+    width: 80%;
+    max-width: 500px;
+    text-align: center;
+    position: relative;
+    color: white;
+}
+
+.close-button {
+    color: var(--color-dark-gray-600);
+    position: absolute;
+    top: 10px;
+    right: 15px;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.close-button:hover,
+.close-button:focus {
+    color: white;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.character-image {
+    max-width: 100%;
+    height: auto;
+    border-radius: 10px;
+    margin-top: 20px;
+    border: 3px solid var(--color-blue-500);
+    /* Borda na imagem */
+}
+
+/* Estilos para o fundo divertido */
+body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(45deg, var(--color-fun-bg-1), var(--color-fun-bg-2), var(--color-fun-bg-3), var(--color-fun-bg-4), var(--color-fun-bg-5));
+    background-size: 400% 400%;
+    animation: gradientBackground 15s ease infinite;
+    z-index: -1;
+    /* Garante que o fundo fique atrás do conteúdo */
+    opacity: 0.3;
+    /* Transparência para não competir com o conteúdo */
+}
+
+@keyframes gradientBackground {
+    0% {
+        background-position: 0% 50%;
+    }
+
+    50% {
+        background-position: 100% 50%;
+    }
+
+    100% {
+        background-position: 0% 50%;
+    }
+}

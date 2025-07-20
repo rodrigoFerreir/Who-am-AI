@@ -1,23 +1,70 @@
-# Importações necessárias do LangChain e outras bibliotecas
 import os
-from dotenv import load_dotenv
+import json
+import requests
+import random  # Para escolher nível aleatório
+from typing import List, Dict, Any
+
+# Importações do LangChain
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.prompts import (
+    ChatPromptTemplate,
+    MessagesPlaceholder,
+    PromptTemplate,
+)
 from langchain.memory import ConversationBufferMemory
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
+
+# Carrega variáveis de ambiente (como GOOGLE_API_KEY)
+from dotenv import load_dotenv
 
 load_dotenv()
-# --- Configuração da Chave de API ---
-# Para usar o Google Gemini, você precisa de uma chave de API.
-# É altamente recomendado definir esta chave como uma variável de ambiente.
-# Exemplo (no seu terminal antes de executar):
-# export GOOGLE_API_KEY="SUA_CHAVE_API_AQUI"
-# No ambiente Canvas, a chave será injetada automaticamente, então você pode deixar a linha abaixo comentada.
-# os.environ["GOOGLE_API_KEY"] = "SUA_CHAVE_API_AQUI"
 
-SYSTEM_PROMPT_AI = """
+
+class GuessingGameAgent:
+    """
+    Agente de IA para o jogo de adivinhação, utilizando LangChain.
+    Gerencia a interação com o modelo Gemini, o histórico da conversa,
+    as regras do jogo (incluindo tentativas) e a geração de imagens.
+    """
+
+    def __init__(self):
+        # Configura a chave da API Gemini.
+        # A chave será injetada automaticamente no ambiente Canvas se deixada vazia.
+        self.api_key = os.environ.get("GOOGLE_API_KEY", "")
+        self.model_ai = os.environ.get("GOOGLE_MODEL_AI", "gemini-2.5-flash")
+        if not self.api_key:
+            print(
+                "AVISO: GOOGLE_API_KEY não configurada. Usando chave padrão do ambiente Canvas."
+            )
+
+        # Inicializa o modelo de linguagem grande (LLM) do Google Gemini.
+        # Modelos específicos para diferentes propósitos para otimização e controle.
+        self.llm_chat = ChatGoogleGenerativeAI(
+            model=self.model_ai,
+            google_api_key=self.api_key,
+            temperature=0.7,
+        )
+        self.llm_character_selection = ChatGoogleGenerativeAI(
+            model=self.model_ai,
+            google_api_key=self.api_key,
+            temperature=0.1,
+        )  # Baixa temperatura para escolha consistente
+        self.llm_classification = ChatGoogleGenerativeAI(
+            model=self.model_ai,
+            google_api_key=self.api_key,
+            temperature=0.0,
+            max_output_tokens=10,
+        )  # Temperatura zero para classificação binária
+
+        # Define o template do prompt principal do jogo.
+        # Inclui instruções, regras, parâmetros da rodada e placeholder para o histórico.
+        self.game_prompt_template = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    """
             Você é o mestre do jogo "Quem Sou Eu?". Seu objetivo é **SER UM PERSONAGEM** (ou uma entidade, conceito, etc.) e dar dicas para o jogador adivinhar quem você é.
 
             **No início de cada nova rodada, você DEVE escolher um personagem (ou entidade) com base no TEMA e NÍVEL de dificuldade fornecidos e MANTÊ-LO CONSISTENTEMENTE durante toda a rodada.**
@@ -25,17 +72,19 @@ SYSTEM_PROMPT_AI = """
 
             **Regras do Jogo:**
             1.  **Escolha do Personagem:** Ao receber o TEMA e NÍVEL, escolha um personagem (ou entidade) que se encaixe. **Mantenha este personagem em mente durante toda a interação.**
-            2.  **Dica Inicial:** Sua primeira resposta deve ser uma dica **amigável, contextual e descritiva de uma cena ou situação** que envolva o personagem, sem revelar sua identidade. O nível de detalhes e a clareza do contexto devem variar com o NÍVEL de dificuldade.
+            2.  **Dica Inicial:** Sua primeira resposta deve ser uma dica **amigável, contextual e descritiva de uma cena ou situação** que envolva o personagem, sem revelar sua identidade. O nível de detalhes e a clareza do contexto devem variar com o NÍVEL de dificuldade. Tente contar uma história rápida para que o usuário entenda a situação.
             3.  **Respostas a Perguntas:** O jogador fará perguntas para tentar adivinhar quem você é. Você deve responder estritamente com "Sim", "Não", "Talvez", ou uma dica curta e objetiva se a pergunta não puder ser respondida com sim/não.
             4.  **Tentativas de Adivinhação:** Se o jogador fizer uma tentativa de adivinhação (ex: "É o Batman?", "Você é a Rainha Elizabeth?"), você deve responder com:
                 * "Sim, você acertou! Eu sou [Nome do Personagem]." (Se correto)
                 * "Não, não sou [Nome do Personagem]. Tente novamente! Aqui vai outra dica: [Nova Dica sobre o Personagem]." (Se incorreto)
             5.  **NÃO REVELE SUA IDENTIDADE DIRETAMENTE** em nenhuma outra circunstância, apenas quando o jogador adivinhar corretamente.
             6.  Mantenha o tom divertido e desafiador.
+            7. Evite repetir personagens já usados em rodadas anteriores, a menos que seja uma nova rodada.
 
             **Instruções de Parâmetros da Rodada Atual:**
             * **TEMA:** {tema}
             * **NÍVEL:** {nivel}
+            * **TENTATIVAS RESTANTES:** {attempts_instruction}
                 * **Fácil:** A dica inicial deve ser um cenário bem descrito, com detalhes claros e que remetam diretamente ao personagem.
                 * **Médio:** A dica inicial deve ser um cenário com contexto moderado, talvez com um elemento mais sutil ou indireto, exigindo um pouco mais de raciocínio.
                 * **Difícil:** A dica inicial deve ser um cenário com contexto muito limitado, mais abstrata ou que exige inferência profunda e conhecimento mais específico.
@@ -55,218 +104,209 @@ SYSTEM_PROMPT_AI = """
 
             ---
             **Início da Rodada:**
-            """
-
-
-class GuessingGameAgent:
-    """
-    Classe que encapsula a lógica do agente de IA para o jogo "Quem Sou Eu?".
-    Gerencia a interação com o modelo Gemini, o histórico da conversa e as regras do jogo.
-    """
-
-    def __init__(self):
-        # Inicializa o modelo de linguagem grande (LLM) do Google Gemini.
-        # "gemini-pro" é um modelo adequado para tarefas de conversação e geração de texto.
-        self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
-            api_key=os.getenv("GOOGLE_API_KEY"),
-        )
-
-        # Define o template do prompt que será enviado ao LLM.
-        # Ele inclui instruções para o agente, regras do jogo, parâmetros da rodada
-        # e um placeholder para o histórico da conversa (`MessagesPlaceholder`).
-        self.game_prompt_template = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    SYSTEM_PROMPT_AI,
+            """,
                 ),
-                # MessagesPlaceholder é crucial para injetar o histórico da conversa no prompt do LLM.
                 MessagesPlaceholder(variable_name="chat_history"),
-                ("user", "{input}"),  # Onde a entrada do usuário será inserida.
+                ("user", "{input}"),
             ]
         )
 
         # Inicializa a memória da conversa.
-        # ConversationBufferMemory armazena todas as mensagens da conversa.
         self.memory = ConversationBufferMemory(
             memory_key="chat_history",
             return_messages=True,
         )
 
-        # Cria a cadeia principal do LangChain usando LCEL (LangChain Expression Language).
-        # Isso permite passar múltiplas variáveis de entrada de forma mais robusta e gerenciar o histórico.
+        # Cria a cadeia principal do LangChain.
         self.chain = (
-            # RunnablePassthrough.assign permite adicionar novas chaves ao dicionário de entrada.
-            # Aqui, estamos carregando o histórico da memória e atribuindo-o à chave 'chat_history'
-            # que o MessagesPlaceholder no prompt espera.
             RunnablePassthrough.assign(
                 chat_history=lambda x: self.memory.load_memory_variables({})[
                     "chat_history"
                 ]
             )
-            # Em seguida, passamos o dicionário de entrada (agora com tema, nivel, input e chat_history) para o prompt.
             | self.game_prompt_template
-            # O prompt renderizado é passado para o LLM.
-            | self.llm
-            # Finalmente, a saída do LLM é convertida em uma string simples.
+            | self.llm_chat
             | StrOutputParser()
         )
 
-        # Variáveis para armazenar o tema e nível da rodada atual, e o nome do personagem adivinhado.
+        # Variáveis de estado do jogo
         self.current_theme = None
         self.current_level = None
-        self.character_name = None  # Será preenchido quando o jogador acertar.
+        self.character_name = None
+        self.max_attempts = 0
+        self.attempts_left = 0
 
     def start_new_game(self, theme: str, level: str) -> str:
         """
         Inicia uma nova rodada do jogo.
-        Limpa o histórico da conversa, define o tema e o nível, e solicita a dica inicial ao agente.
-
-        Args:
-            theme (str): O tema escolhido pelo usuário (ex: "Filmes", "História").
-            level (str): O nível de dificuldade escolhido pelo usuário (ex: "Fácil", "Médio", "Difícil", "Aleatório").
-
-        Returns:
-            str: A dica inicial fornecida pelo agente de IA.
+        Limpa o histórico, define tema/nível/tentativas, escolhe o personagem e gera a dica inicial.
         """
-        self.memory.clear()  # Limpa todo o histórico da conversa para uma nova rodada.
+        self.memory.clear()
         self.current_theme = theme
         self.current_level = level
-        self.character_name = None  # Reseta o nome do personagem adivinhado.
+        self.character_name = None
 
-        # Invoca a cadeia LangChain para obter a dica inicial.
-        # Passamos todas as variáveis que o prompt espera.
-        initial_response_text = self.chain.invoke(
-            {
-                "tema": self.current_theme,
-                "nivel": self.current_level,
-                "input": "Por favor, me dê a dica inicial.",  # Esta é a "entrada" do usuário para a primeira interação
-            }
+        # Define o número máximo de tentativas com base no nível
+        attempts_map = {
+            "Facil": 10,
+            "Medio": 8,
+            "Dificil": 5,
+        }
+        self.max_attempts = attempts_map.get(level, 7)
+        self.attempts_left = self.max_attempts
+
+        # Se o nível for "Aleatório", escolhe um nível real
+        if self.current_level == "Aleatorio":
+            self.current_level = random.choice(["Facil", "Medio", "Dificil"])
+            print(f"DEBUG Agent: Nível aleatório escolhido: {self.current_level}")
+
+        try:
+            # 1. Escolhe o personagem internamente (com um prompt separado para controle)
+            character_selection_prompt_template = PromptTemplate.from_template(
+                """Você é um mestre na escolha de personagens para o jogo 'Quem Sou Eu?'. Sua tarefa é pensar em um personagem famoso (real ou fictício) do tema '{theme}' que se encaixe perfeitamente no nível de dificuldade '{level}'.
+
+                **Diretrizes para a escolha do personagem:**
+                - **Relevância:** O personagem DEVE ser diretamente associado ao tema '{theme}'.
+                - **Variedade e Aleatoriedade:** Tente escolher um personagem diferente a cada vez, evitando repetições óbvias se o jogo for reiniciado. Seja criativo e explore a amplitude do tema.
+                - **Nível de Dificuldade:**
+                    - **Fácil:** Escolha um personagem muito conhecido, icônico e central ao tema. Aquele que a maioria das pessoas reconheceria facilmente.
+                    - **Médio:** Escolha um personagem conhecido, mas que talvez exija um pouco mais de conhecimento ou seja ligeiramente menos óbvio que os "fáceis". Pode ser um coadjuvante importante ou alguém de uma obra um pouco menos mainstream.
+                    - **Difícil:** Escolha um personagem mais obscuro, de nicho, ou que seja conhecido apenas por fãs mais dedicados do tema. Pode ser alguém com um papel menor, mas ainda relevante, ou de uma obra menos popular.
+
+                Responda APENAS com o nome do personagem. Não forneça nenhum outro texto, explicação ou formatação adicional.
+                Exemplo de resposta: 'Darth Vader' ou 'Cleópatra' ou 'Sherlock Holmes'."""
+            )
+            character_selection_chain = (
+                character_selection_prompt_template
+                | self.llm_character_selection
+                | StrOutputParser()
+            )
+            self.character_name = character_selection_chain.invoke(
+                {"theme": self.current_theme, "level": self.current_level}
+            ).strip()
+            print(f"DEBUG Agent: Personagem escolhido pela IA: {self.character_name}")
+
+            # 2. Gera a primeira dica usando o prompt principal do jogo
+            # A instrução de tentativas é incluída aqui.
+            attempts_instruction_text = (
+                f"Você tem {self.attempts_left} tentativas diretas restantes para adivinhar o personagem. "
+                f"Se o jogador tentar adivinhar e errar, mencione as tentativas restantes. "
+                f"Se as tentativas chegarem a 0 e o jogador não acertou, diga 'Suas tentativas acabaram! O personagem era {self.character_name}.'"
+            )
+
+            initial_response_text = self.chain.invoke(
+                {
+                    "tema": self.current_theme,
+                    "nivel": self.current_level,
+                    "attempts_instruction": attempts_instruction_text,  # Passa a instrução de tentativas
+                    "input": "Por favor, me dê a dica inicial.",
+                }
+            )
+
+            # Salva a interação na memória
+            self.memory.save_context(
+                {"input": "Por favor, me dê a dica inicial."},
+                {"output": initial_response_text},
+            )
+
+            return initial_response_text
+
+        except Exception as e:
+            print(f"Erro ao iniciar novo jogo com a IA: {e}")
+            return "Desculpe, não consegui iniciar um novo jogo no momento. Tente novamente."
+
+    def classify_user_input(self, user_input: str) -> str:
+        """
+        Classifica a entrada do usuário como 'guess' (tentativa de adivinhação) ou 'question'.
+        Utiliza um LLM separado para uma classificação precisa.
+        """
+        classification_prompt_template = PromptTemplate.from_template(
+            "A seguinte entrada do usuário é uma tentativa de adivinhar o personagem "
+            "ou uma pergunta sobre o personagem? Responda APENAS 'guess' ou 'question'."
+            "\n\nEntrada do usuário: '{user_input}'"
+        )
+        classification_chain = (
+            classification_prompt_template | self.llm_classification | StrOutputParser()
         )
 
-        # Salva a primeira interação na memória para que o histórico seja mantido.
-        # A "pergunta" inicial do usuário é a instrução para a dica, e a "resposta" é a dica do agente.
-        self.memory.save_context(
-            {"input": "Por favor, me dê a dica inicial."},
-            {"output": initial_response_text},
+        try:
+            classification = (
+                classification_chain.invoke({"user_input": user_input}).strip().lower()
+            )
+            if classification == "guess":
+                return "guess"
+            return "question"
+        except Exception as e:
+            print(f"Erro ao classificar entrada do usuário: {e}")
+            return "question"  # Padrão para pergunta em caso de erro
+
+    def process_player_input(
+        self,
+        player_input: str,
+        number_attempts_left_session: int,
+    ) -> str:
+        """
+        Processa a entrada do jogador, interage com a IA e retorna a resposta.
+        Gerencia a contagem de tentativas e verifica o fim do jogo.
+        """
+        # Classifica a entrada do usuário para determinar se é uma tentativa
+        input_type = self.classify_user_input(player_input)
+        print(f"DEBUG Agent: Entrada do usuário classificada como: {input_type}")
+        print(
+            f"DEBUG Agent: Tentativas restantes na sessão: {number_attempts_left_session}"
         )
 
-        return initial_response_text
+        # Decrementa tentativas apenas se for uma tentativa de adivinhação
+        if input_type == "guess":
+            self.attempts_left -= 1
+            print(f"DEBUG Agent: Tentativas restantes: {self.attempts_left}")
 
-    def process_player_input(self, player_input: str) -> str:
-        """
-        Processa a entrada do jogador (pergunta ou tentativa de adivinhação) e retorna a resposta do agente.
-        Também tenta identificar se o personagem foi revelado na resposta do agente.
+        # Adiciona a instrução sobre tentativas restantes ao prompt principal para a IA
+        attempts_instruction_text = (
+            f"Você tem {self.attempts_left} tentativas diretas restantes para adivinhar o personagem. "
+            f"Se o jogador tentar adivinhar e errar, mencione as tentativas restantes. "
+            f"Se as tentativas chegarem a 0 e o jogador não acertou, diga 'Suas tentativas acabaram! O personagem era {self.character_name}.'"
+        )
 
-        Args:
-            player_input (str): A pergunta ou adivinhação do jogador.
-
-        Returns:
-            str: A resposta do agente de IA.
-        """
-        # Invoca a cadeia LangChain com a nova entrada do jogador.
-        # O `chat_history` é injetado automaticamente pelo `RunnablePassthrough.assign`
-        # antes que o prompt seja processado.
+        # Invoca a cadeia LangChain com a nova entrada do jogador e as instruções atualizadas.
         agent_response_text = self.chain.invoke(
             {
                 "tema": self.current_theme,
                 "nivel": self.current_level,
+                "attempts_instruction": attempts_instruction_text,  # Passa a instrução de tentativas atualizada
                 "input": player_input,
             }
         )
+        agent_response_text = agent_response_text.strip()
 
-        # Salva a interação atual (entrada do jogador e resposta do agente) na memória.
+        # Salva a interação atual na memória.
         self.memory.save_context(
             {"input": player_input}, {"output": agent_response_text}
         )
 
         # Heurística para tentar capturar o nome do personagem quando o jogador acerta.
-        # O prompt instrui o LLM a usar o formato "Sim, você acertou! Eu sou [Nome do Personagem]."
-        if "Sim, você acertou! Eu sou" in agent_response_text:
+        if "Sim, você acertou!" in agent_response_text:
             try:
-                # Extrai o nome do personagem da string de resposta.
-                # Remove o prefixo e o sufixo (ponto final) para obter apenas o nome.
                 self.character_name = (
                     agent_response_text.split("Sim, você acertou! Eu sou ")[1]
                     .replace(".", "")
                     .strip()
                 )
             except IndexError:
-                # Em caso de falha na extração (formato inesperado), o nome permanece None.
                 print(
                     "Aviso: Falha ao extrair o nome do personagem da resposta do agente."
                 )
                 pass
+        elif (
+            "Suas tentativas acabaram!" in agent_response_text
+            and self.attempts_left <= 0
+        ):
+            # Garante que o character_name esteja definido mesmo se as tentativas acabarem
+            if not self.character_name:
+                print(
+                    "Aviso: Tentativas acabaram, mas character_name não está definido."
+                )
+                # Tenta uma última extração ou define um fallback
+                self.character_name = "Personagem Desconhecido"  # Fallback
 
         return agent_response_text
-
-
-# --- Exemplo de Uso (para demonstração em console) ---
-if __name__ == "__main__":
-    # Este bloco é executado apenas quando o script é executado diretamente.
-    # Ele simula a interação do jogo no console.
-
-    game = GuessingGameAgent()
-
-    print("Bem-vindo ao jogo 'Quem Sou Eu?'!")
-    print("Você pode definir o tema e o nível de dificuldade.")
-    print(
-        "Temas disponíveis: Filmes, Séries, História, Política, Literatura, Ciência, Esportes, Música, Jogos, Personalidades, Mitologia, Personagens de Desenho Animado"
-    )
-    print("Níveis disponíveis: Fácil, Médio, Difícil, Aleatório")
-    print("Digite 'sair' a qualquer momento para sair do jogo.")
-    print("Digite 'nova' durante o jogo para iniciar uma nova rodada.")
-
-    while True:
-        # Loop para escolher tema e nível para uma nova rodada
-        theme = input("\nEscolha um tema: ").strip()
-        if theme.lower() == "sair":
-            break
-        level = input("Escolha um nível: ").strip()
-        if level.lower() == "sair":
-            break
-
-        print(f"\nIniciando nova rodada: Tema '{theme}', Nível '{level}'")
-        try:
-            # Inicia o jogo e obtém a primeira dica
-            initial_hint = game.start_new_game(theme, level)
-            print(f"Agente: {initial_hint}")
-        except Exception as e:
-            print(f"Erro ao iniciar o jogo: {e}")
-            print(
-                f"Por favor, verifique se a GOOGLE_API_KEY está configurada corretamente ou se há um problema de conexão."
-            )
-            continue  # Volta para o início do loop para tentar novamente.
-
-        # Loop para a interação do jogo (perguntas e adivinhações)
-        while True:
-            player_input = input(
-                "Sua pergunta ou adivinhação (ou 'nova' para nova rodada, 'sair' para sair): "
-            ).strip()
-
-            if player_input.lower() == "sair":
-                print("Obrigado por jogar!")
-                exit()  # Sai do programa
-            elif player_input.lower() == "nova":
-                print("\nSolicitando uma nova rodada...")
-                break  # Sai do loop interno para pedir novo tema/nível novamente
-            else:
-                try:
-                    # Processa a entrada do jogador e obtém a resposta do agente
-                    agent_response = game.process_player_input(player_input)
-                    print(f"Agente: {agent_response}")
-
-                    # Verifica se o jogador acertou
-                    if "Sim, você acertou!" in agent_response:
-                        if game.character_name:
-                            print(f"Parabéns! O personagem era: {game.character_name}")
-                        else:
-                            print("Parabéns! Você acertou o personagem!")
-                        print("Iniciando uma nova rodada...")
-                        break  # Sai do loop interno para pedir novo tema/nível novamente
-                except Exception as e:
-                    print(f"Erro ao processar sua entrada: {e}")
-                    print("Por favor, tente novamente ou verifique sua conexão.")
-
-    print("Jogo encerrado.")
