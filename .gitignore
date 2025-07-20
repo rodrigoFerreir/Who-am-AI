@@ -1,3 +1,30 @@
+# Django-specific files
+*.log
+*.pot
+*.pyc
+__pycache__/
+local_settings.py
+db.sqlite3
+media/ # If user-uploaded media is not to be versioned
+static_collected/ # If collected static files are not to be versioned
+
+# Virtual Environment
+.env
+venv/
+env/
+
+# IDE-specific files (e.g., PyCharm)
+.idea/
+
+# Operating System specific files
+.DS_Store # macOS
+Thumbs.db # Windows
+
+# Other development-related files
+.coverage
+.tox/
+.eggs/
+
 data
 .venv
 *.env*
