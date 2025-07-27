@@ -34,7 +34,7 @@ def _get_last_characters_name_sync(user_id: str, theme: str, level: str):
             user__id=user_id,
             theme=theme,
             level=level,
-        ).order_by("-end_time")[:10]
+        ).order_by("-end_time")[:100]
 
         data = [i.character_name for i in data if i.character_name]
         print(f"DEBUG Celery Task DB: Sessão {level} encontrada no banco de dados.")
@@ -49,7 +49,9 @@ def _get_last_characters_name_sync(user_id: str, theme: str, level: str):
 def _save_message_sync(session, sender, message_text):
     """Salva uma mensagem no banco de dados (síncrona)."""
     ChatMessage.objects.create(
-        session=session, sender=sender, message_text=message_text
+        session=session,
+        sender=sender,
+        message_text=message_text,
     )
     print(
         f"DEBUG Celery Task DB: Mensagem de '{sender}' salva para sessão {session.session_id}."
