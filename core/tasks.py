@@ -27,6 +27,25 @@ def _get_game_session_sync(session_id):
         return None
 
 
+def _get_last_characters_name_sync(user_id: str, theme: str, level: str):
+    """Busca uma sessão de jogo no banco de dados (síncrona)."""
+    try:
+        data = GameSession.objects.filter(
+            user__id=user_id,
+            theme=theme,
+            level=level,
+        ).order_by("-end_time")[:10]
+
+        data = [i.character_name for i in data if i.character_name]
+        print(f"DEBUG Celery Task DB: Sessão {level} encontrada no banco de dados.")
+        return data
+    except GameSession.DoesNotExist:
+        print(
+            f"DEBUG Celery Task DB: não foi possivel buscar ultimos personagens para {user_id} NÃO encontrada no banco de dados."
+        )
+        return []
+
+
 def _save_message_sync(session, sender, message_text):
     """Salva uma mensagem no banco de dados (síncrona)."""
     ChatMessage.objects.create(
@@ -85,16 +104,25 @@ def process_start_game_task(session_id, theme, level, user_id):
 
     try:
         # Define o número de tentativas com base no nível
+        # Padrão para 7 se "Aleatorio" ou não mapeado
         attempts_map = {"Facil": 10, "Medio": 8, "Dificil": 5}
-        game_session.attempts_left = attempts_map.get(
-            level, 7
-        )  # Padrão para 7 se "Aleatorio" ou não mapeado
+        game_session.attempts_left = attempts_map.get(level, 7)
         game_session.theme = theme
         game_session.level = level
         game_session.save()  # Salva as tentativas iniciais e outros dados
 
+        last_character_names = _get_last_characters_name_sync(
+            user_id,
+            theme,
+            level,
+        )
+
         # Inicia o jogo com o agente de IA (que internamente define o character_name e gera a primeira dica)
-        initial_hint = global_game_agent.start_new_game(theme, level)
+        initial_hint = global_game_agent.start_new_game(
+            theme,
+            level,
+            last_character_names,
+        )
         game_session.character_name = (
             global_game_agent.character_name
         )  # Atualiza o nome do personagem após a IA escolher
@@ -105,12 +133,19 @@ def process_start_game_task(session_id, theme, level, user_id):
         channel_layer = get_channel_layer()
         async_to_sync(channel_layer.group_send)(
             f"game_{session_id}",
-            {"type": "chat_message", "sender": "ai", "message": initial_hint},
+            {
+                "type": "chat_message",
+                "sender": "ai",
+                "message": initial_hint,
+            },
         )
         # Envia a contagem de tentativas para o frontend
         async_to_sync(channel_layer.group_send)(
             f"game_{session_id}",
-            {"type": "update_attempts", "attempts_left": game_session.attempts_left},
+            {
+                "type": "update_attempts",
+                "attempts_left": game_session.attempts_left,
+            },
         )
         print(
             f"DEBUG Celery Task: Jogo iniciado e dica inicial enviada para sessão {session_id}."
@@ -168,7 +203,11 @@ def process_player_message_task(session_id, player_message, user_id_from_api):
     # Envia a mensagem do jogador para o grupo de chat (para que o cliente veja que foi enviada)
     async_to_sync(channel_layer.group_send)(
         f"game_{session_id}",
-        {"type": "chat_message", "sender": "user", "message": player_message},
+        {
+            "type": "chat_message",
+            "sender": "user",
+            "message": player_message,
+        },
     )
 
     try:
@@ -213,19 +252,41 @@ def process_player_message_task(session_id, player_message, user_id_from_api):
             game_session.score = _calculate_score_sync(game_session)
             game_session.end_time = timezone.now()
             game_session.save()
-            return
 
-        if (
+            # Gera a imagem do personagem
+            image_prompt = global_game_agent.generate_character_image_prompt()
+            image_url = global_game_agent.generate_image(image_prompt)
+            print(
+                f"DEBUG Celery Task: Imagem gerada para {game_session.character_name}: {image_url[:50]}..."
+            )
+
+            async_to_sync(channel_layer.group_send)(
+                f"game_{session_id}",
+                {
+                    "type": "game_over",
+                    "message": f"Parabéns! Você adivinhou o personagem: {game_session.character_name}!",
+                    "score": game_session.score,
+                    "character_name": game_session.character_name,
+                    "character_image_url": image_url,  # NOVO: Envia a URL da imagem
+                },
+            )
+        elif (
             game_session.attempts_left <= 0 and input_type == "guess"
         ):  # Fim de jogo por tentativas esgotadas
             # Garante que o jogo só termine por tentativas esgotadas se a última foi um guess
+            # Pontuação final mesmo sem acertar
             game_session.is_completed = True
             game_session.character_name = global_game_agent.character_name
-            game_session.score = _calculate_score_sync(
-                game_session
-            )  # Pontuação final mesmo sem acertar
+            game_session.score = _calculate_score_sync(game_session)
             game_session.end_time = timezone.now()
             game_session.save()
+
+            # Gera a imagem do personagem
+            image_prompt = global_game_agent.generate_character_image_prompt()
+            image_url = global_game_agent.generate_image(image_prompt)
+            print(
+                f"DEBUG Celery Task: Jogo terminado por tentativas para {game_session.character_name}: {image_url[:50]}..."
+            )
 
             async_to_sync(channel_layer.group_send)(
                 f"game_{session_id}",
@@ -234,8 +295,11 @@ def process_player_message_task(session_id, player_message, user_id_from_api):
                     "message": f"Suas tentativas acabaram! O personagem era: {game_session.character_name}.",
                     "score": game_session.score,
                     "character_name": game_session.character_name,
+                    "character_image_url": image_url,  # NOVO: Envia a URL da imagem
                 },
             )
+
+        return "success 🆗"
 
     except Exception as e:
         print(
@@ -248,3 +312,4 @@ def process_player_message_task(session_id, player_message, user_id_from_api):
                 "message": f"Erro ao processar sua mensagem com a IA: {str(e)}",
             },
         )
+        return "fail ❌"

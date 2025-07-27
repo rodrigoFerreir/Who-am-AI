@@ -15,6 +15,8 @@ from langchain.memory import ConversationBufferMemory
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
+from duckduckgo_search import duckduckgo_search
+
 
 # Carrega variáveis de ambiente (como GOOGLE_API_KEY)
 from dotenv import load_dotenv
@@ -71,7 +73,7 @@ class GuessingGameAgent:
             **É CRUCIAL que você mantenha o mesmo personagem durante toda a rodada até que ele seja adivinhado ou uma nova rodada seja iniciada.**
 
             **Regras do Jogo:**
-            1.  **Escolha do Personagem:** Ao receber o TEMA e NÍVEL, escolha um personagem (ou entidade) que se encaixe. **Mantenha este personagem em mente durante toda a interação.**
+            1.  **Escolha do Personagem:** Ao receber o personagem, gere uma abordagem divertida e empolgante **Mantenha este personagem em mente durante toda a interação.**
             2.  **Dica Inicial:** Sua primeira resposta deve ser uma dica **amigável, contextual e descritiva de uma cena ou situação** que envolva o personagem, sem revelar sua identidade. O nível de detalhes e a clareza do contexto devem variar com o NÍVEL de dificuldade. Tente contar uma história rápida para que o usuário entenda a situação.
             3.  **Respostas a Perguntas:** O jogador fará perguntas para tentar adivinhar quem você é. Você deve responder estritamente com "Sim", "Não", "Talvez", ou uma dica curta e objetiva se a pergunta não puder ser respondida com sim/não.
             4.  **Tentativas de Adivinhação:** Se o jogador fizer uma tentativa de adivinhação (ex: "É o Batman?", "Você é a Rainha Elizabeth?"), você deve responder com:
@@ -79,11 +81,12 @@ class GuessingGameAgent:
                 * "Não, não sou [Nome do Personagem]. Tente novamente! Aqui vai outra dica: [Nova Dica sobre o Personagem]." (Se incorreto)
             5.  **NÃO REVELE SUA IDENTIDADE DIRETAMENTE** em nenhuma outra circunstância, apenas quando o jogador adivinhar corretamente.
             6.  Mantenha o tom divertido e desafiador.
-            7. Evite repetir personagens já usados em rodadas anteriores, a menos que seja uma nova rodada.
+            7.  Não repetir personagens já usados em rodadas anteriores para aumentar a dinamica do jogo.
 
             **Instruções de Parâmetros da Rodada Atual:**
             * **TEMA:** {tema}
             * **NÍVEL:** {nivel}
+            * **Você é {character_name}, ja foi escolhido anteriormente
             * **TENTATIVAS RESTANTES:** {attempts_instruction}
                 * **Fácil:** A dica inicial deve ser um cenário bem descrito, com detalhes claros e que remetam diretamente ao personagem.
                 * **Médio:** A dica inicial deve ser um cenário com contexto moderado, talvez com um elemento mais sutil ou indireto, exigindo um pouco mais de raciocínio.
@@ -130,21 +133,24 @@ class GuessingGameAgent:
         )
 
         # Variáveis de estado do jogo
-        self.current_theme = None
-        self.current_level = None
-        self.character_name = None
+        self.current_theme = ""
+        self.current_level = ""
+        self.character_name = ""
         self.max_attempts = 0
         self.attempts_left = 0
 
-    def start_new_game(self, theme: str, level: str) -> str:
+    def start_new_game(self, theme: str, level: str, last_character_names: list) -> str:
         """
         Inicia uma nova rodada do jogo.
         Limpa o histórico, define tema/nível/tentativas, escolhe o personagem e gera a dica inicial.
         """
-        self.memory.clear()
+        # self.memory.clear()
+        self.character_name = ""
         self.current_theme = theme
         self.current_level = level
-        self.character_name = None
+        self.last_character_names = (
+            ", ".join(last_character_names) if last_character_names else ""
+        )
 
         # Define o número máximo de tentativas com base no nível
         attempts_map = {
@@ -168,6 +174,7 @@ class GuessingGameAgent:
                 **Diretrizes para a escolha do personagem:**
                 - **Relevância:** O personagem DEVE ser diretamente associado ao tema '{theme}'.
                 - **Variedade e Aleatoriedade:** Tente escolher um personagem diferente a cada vez, evitando repetições óbvias se o jogo for reiniciado. Seja criativo e explore a amplitude do tema.
+                - **Não repetir estes personagens pois já foram utilizados em rodadas anteriores {last_character_names}
                 - **Nível de Dificuldade:**
                     - **Fácil:** Escolha um personagem muito conhecido, icônico e central ao tema. Aquele que a maioria das pessoas reconheceria facilmente.
                     - **Médio:** Escolha um personagem conhecido, mas que talvez exija um pouco mais de conhecimento ou seja ligeiramente menos óbvio que os "fáceis". Pode ser um coadjuvante importante ou alguém de uma obra um pouco menos mainstream.
@@ -181,14 +188,22 @@ class GuessingGameAgent:
                 | self.llm_character_selection
                 | StrOutputParser()
             )
+
             self.character_name = character_selection_chain.invoke(
-                {"theme": self.current_theme, "level": self.current_level}
+                {
+                    "theme": self.current_theme,
+                    "level": self.current_level,
+                    "character_name": self.character_name,
+                    "last_character_names": self.last_character_names,
+                }
             ).strip()
             print(f"DEBUG Agent: Personagem escolhido pela IA: {self.character_name}")
 
             # 2. Gera a primeira dica usando o prompt principal do jogo
             # A instrução de tentativas é incluída aqui.
             attempts_instruction_text = (
+                f"Você é este personagem que já foi escolhido {self.character_name}. "
+                f"Cuidado ao revelar suas dicas. "
                 f"Você tem {self.attempts_left} tentativas diretas restantes para adivinhar o personagem. "
                 f"Se o jogador tentar adivinhar e errar, mencione as tentativas restantes. "
                 f"Se as tentativas chegarem a 0 e o jogador não acertou, diga 'Suas tentativas acabaram! O personagem era {self.character_name}.'"
@@ -198,6 +213,7 @@ class GuessingGameAgent:
                 {
                     "tema": self.current_theme,
                     "nivel": self.current_level,
+                    "character_name": self.character_name,
                     "attempts_instruction": attempts_instruction_text,  # Passa a instrução de tentativas
                     "input": "Por favor, me dê a dica inicial.",
                 }
@@ -273,6 +289,7 @@ class GuessingGameAgent:
             {
                 "tema": self.current_theme,
                 "nivel": self.current_level,
+                "character_name": self.character_name,
                 "attempts_instruction": attempts_instruction_text,  # Passa a instrução de tentativas atualizada
                 "input": player_input,
             }
@@ -310,3 +327,34 @@ class GuessingGameAgent:
                 self.character_name = "Personagem Desconhecido"  # Fallback
 
         return agent_response_text
+
+    def generate_character_image_prompt(self):
+        """
+        Gera uma consulta de busca para encontrar uma imagem do personagem.
+        """
+        if not self.character_name:
+            return "personagem desconhecido"
+
+        # Adapta o prompt para uma consulta de busca de imagem
+        return f"imagem de {self.character_name}"
+
+    def generate_image(self, prompt_image: str):
+        try:
+            results = duckduckgo_search.DDGS().images(
+                keywords=prompt_image,
+                region="us-en",
+                safesearch="moderate",
+                size=None,
+                color=None,
+                type_image="photo",
+                layout=None,
+                license_image=None,
+                max_results=1,
+            )
+            return results[0].get("image", "")
+        except IndexError:
+            print(f"Nenhum resultado de imagem foi encontrado para {prompt_image}")
+            return ""
+        except Exception as err:
+            print(f"Error on gen image result {err}")
+            return ""

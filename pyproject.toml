@@ -17,4 +17,6 @@ dependencies = [
     "python-dotenv>=1.1.1",
     "redis>=6.2.0",
     "djangorestframework-simplejwt>=5.5.0",
+    "duckduckgo-search>=8.1.1",
+    "ddgs>=9.4.3",
 ]
